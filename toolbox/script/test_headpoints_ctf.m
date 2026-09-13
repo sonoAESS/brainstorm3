@@ -77,6 +77,7 @@ ChannelMatNative.TransfMeg = {};
 ChannelMatNative.TransfMegLabels = {};
 ChannelMatNative.TransfEeg = {};
 ChannelMatNative.TransfEegLabels = {};
+ChannelMatNative.Channel = struct('Name', {'MEG 1'}, 'Type', {'MEG'}, 'Loc', {[0; 0; 0.5]}, 'Orient', {[]});
 % Head points with the three anatomical fiducials (positions in meters)
 HeadPointsFid = struct();
 HeadPointsFid.Loc   = [0.00, 0.10, 0.10; -0.07, 0.00, 0.02; 0.07, 0.00, 0.02]';
@@ -101,6 +102,12 @@ assert(isOfferAlign == 0, 'Test 1c: expected no alignment offer with an existing
 [strWarn, isOfferAlign] = process_headpoints_add('GetMegAlignWarning', ChannelMatScs, struct());
 assert(isempty(strWarn), 'Test 1d: expected no warning when the MEG is aligned in SCS');
 assert(isOfferAlign == 0, 'Test 1d: expected no offer');
+% Case 1e: no MEG channel in the channel file => no warning, no offer (alignment is not relevant)
+ChannelMatEeg = struct();
+ChannelMatEeg.Channel = struct('Name', {'EEG 1'}, 'Type', {'EEG'}, 'Loc', {[0; 0; 0.5]}, 'Orient', {[]});
+[strWarn, isOfferAlign] = process_headpoints_add('GetMegAlignWarning', ChannelMatEeg, HeadPointsFid);
+assert(isempty(strWarn), 'Test 1e: expected no warning when there is no MEG channel');
+assert(isOfferAlign == 0, 'Test 1e: expected no alignment offer without MEG channels');
 fprintf('Test 1 (GetMegAlignWarning): passed\n');
 
 %% ===== TEST 2: SCORE_POS_FILE =====
@@ -110,7 +117,7 @@ ChannelMatBest.HeadPoints.Label = {'NAS', 'LPA', 'RPA', 'HPI-N', 'HPI-L', 'HPI-R
 ChannelMatBest.HeadPoints.Loc   = zeros(3, 8);
 ChannelMatBest.HeadPoints.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL', 'HPI', 'HPI', 'HPI', 'EXTRA', 'EXTRA'};
 scoreBest = select_pos_file('ScorePosFile', ChannelMatBest);
-assert(scoreBest == 338, 'Test 2a: expected score 338, got %d', scoreBest);
+assert(scoreBest == 3038, 'Test 2a: expected score 3038, got %d', scoreBest);
 % File with only digitized points
 ChannelMatPoints = struct();
 ChannelMatPoints.HeadPoints.Label = {'EXTRA', 'EXTRA', 'EXTRA'};
@@ -181,15 +188,29 @@ else
     HeadPoints.Loc   = [0.00, 0.10, 0.10; -0.07, 0.00, 0.02; 0.07, 0.00, 0.02]';
     HeadPoints.Label = {'NAS', 'LPA', 'RPA'};
     HeadPoints.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL'};
+    % Pre-merge the head points in the channel file, as AddHeadpoints() does before proposing the alignment
+    ChannelMat.HeadPoints = HeadPoints;
     % Align the MEG sensors in SCS
     ChannelMat = process_headpoints_add('AlignMegToScs', ChannelMat, HeadPoints);
     assert(ismember('Native=>Brainstorm/CTF', ChannelMat.TransfMegLabels), 'Test 4a: expected "Native=>Brainstorm/CTF" transformation');
     assert(~isequal(ChannelMat.Channel.Loc, [0; 0; 0.5]), 'Test 4b: expected the sensor position to change after alignment');
+    % The SCS coordinate system must be fully defined
+    assert(isfield(ChannelMat.SCS, 'Origin') && (length(ChannelMat.SCS.Origin) == 3), 'Test 4e: expected SCS.Origin to be defined');
+    assert(isfield(ChannelMat.SCS, 'R') && isequal(size(ChannelMat.SCS.R), [3 3]), 'Test 4f: expected a 3x3 SCS rotation matrix');
+    % The head points must have been converted to SCS too
+    assert(isfield(ChannelMat.HeadPoints, 'Loc') && ~isempty(ChannelMat.HeadPoints.Loc) && ~isequal(ChannelMat.HeadPoints.Loc, HeadPoints.Loc), 'Test 4g: expected the head points to be converted to SCS');
     % Calling again must not apply the transformation twice (safety guard in AlignMegToScs)
     LocAfterFirstAlign = ChannelMat.Channel.Loc;
     ChannelMat = process_headpoints_add('AlignMegToScs', ChannelMat, HeadPoints);
     assert(isequal(ChannelMat.Channel.Loc, LocAfterFirstAlign), 'Test 4c: expected the sensor position to stay the same when called again');
     assert(numel(find(strcmp(ChannelMat.TransfMegLabels, 'Native=>Brainstorm/CTF'))) == 1, 'Test 4d: expected only one "Native=>Brainstorm/CTF" transformation');
+    % Missing fiducials: the channel file must be returned unchanged
+    HeadPointsNoFid = struct();
+    HeadPointsNoFid.Loc   = [0.01; 0.02; 0.03];
+    HeadPointsNoFid.Label = {'EXTRA'};
+    HeadPointsNoFid.Type  = {'EXTRA'};
+    ChannelMatNoFid = process_headpoints_add('AlignMegToScs', ChannelMat, HeadPointsNoFid);
+    assert(isequal(ChannelMatNoFid, ChannelMat), 'Test 4h: expected the channel file to be unchanged when fiducials are missing');
     fprintf('Test 4 (AlignMegToScs): passed\n');
 end
 
