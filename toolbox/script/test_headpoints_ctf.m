@@ -48,11 +48,22 @@ if exist('brainstorm', 'file')
         isBstRunning = false;
     end
     if ~isBstRunning
+        % Preferred: "nogui" mode (a hidden user interface exists). In fully headless
+        % environments (no display at all) this fails when loading the Java window icons,
+        % so fall back to "server" mode, which creates no Java objects at all.
         try
             brainstorm nogui local;
             isBstRunning = (brainstorm('status') ~= 0);
         catch
             isBstRunning = false;
+        end
+        if ~isBstRunning
+            try
+                brainstorm server local;
+                isBstRunning = (brainstorm('status') ~= 0);
+            catch
+                isBstRunning = false;
+            end
         end
     end
 end
