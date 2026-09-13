@@ -119,7 +119,10 @@ function strMsg = AddHeadpoints(ChannelFile, HeadPointsFile, FileFormat, isFixUn
     [tmp, iChanStudies] = bst_get('ChannelFile', ChannelFile); 
     % Read new files
     HeadPoints = [];
-    if (nargin < 3) || isempty(HeadPointsFile) || isempty(FileFormat)
+    % Interactive session when the file was not specified: the user is asked to select it, and can
+    % be prompted for the MEG alignment (not the case when running as part of a pipeline)
+    isInteractive = (nargin < 3) || isempty(HeadPointsFile) || isempty(FileFormat);
+    if isInteractive
         [FileMat, HeadPointsFile, FileFormat] = import_channel(iChanStudies, [], [], [], [], 0, [], []);
     else
         FileMat = import_channel(iChanStudies, HeadPointsFile, FileFormat, [], [], 0, isFixUnits, isApplyVox2ras);
@@ -182,13 +185,119 @@ function strMsg = AddHeadpoints(ChannelFile, HeadPointsFile, FileFormat, isFixUn
         ChannelMat.HeadPoints = HeadPoints;
     end
 
+    % ===== CHECK MEG COORDINATE SYSTEM =====
+    % If the MEG sensors are not aligned in SCS, and the imported head points contain anatomical
+    % fiducials (NAS/LPA/RPA), warn the user and offer to update the MEG coordinate system.
+    % This only applies when the file was selected manually (interactive session), not when the
+    % process is running as part of a pipeline.
+    [strWarn, isOfferAlign] = process_headpoints_add('GetMegAlignWarning', ChannelMat, HeadPoints);
+    if isInteractive && isOfferAlign
+        isAlign = java_dialog('confirm', ...
+            ['The MEG sensors do not have the "Native=>Brainstorm/CTF" transformation and are ' 10 ...
+             'currently in "Native" (head-coil based) coordinates.' 10 ...
+             'Do you want to align the MEG sensors in SCS coordinates using the anatomical ' 10 ...
+             'fiducials (NAS/LPA/RPA) of the new head points?'], ...
+            'Align MEG sensors in SCS', []);
+        if isAlign
+            ChannelMat = process_headpoints_add('AlignMegToScs', ChannelMat, HeadPoints);
+            strWarn = 'The MEG sensors were aligned in SCS coordinates using the digitized anatomical fiducials.';
+        end
+    end
+
     % Message: head points added
     nNewPoints = length(HeadPoints.Label) - nDupliPoints;
     strMsg = sprintf('%d new head points added.\n%sTotal: %d points.', nNewPoints, strDupli, length(ChannelMat.HeadPoints.Label));
+    % Warning about the MEG coordinate system
+    if ~isempty(strWarn)
+        strMsg = [strMsg 10 10 strWarn];
+    end
     % History: Added head points
     ChannelMat = bst_history('add', ChannelMat, 'headpoints', strrep(strMsg, char(10), '  '));
     % Save modified file
     bst_save(file_fullpath(ChannelFile), ChannelMat, 'v7');
+end
+
+
+%% ===== GET MEG ALIGNMENT WARNING =====
+function [strWarn, isOfferAlign] = GetMegAlignWarning(ChannelMat, HeadPoints)
+    % GET_MEG_ALIGN_WARNING: Check the current MEG coordinate system and the fiducials present in
+    % the new head points, to warn about (and possibly offer to fix) a missing or outdated
+    % "Native=>Brainstorm/CTF" transformation.
+    %
+    % OUTPUT:
+    %    - strWarn      : Warning message to display (empty if no warning)
+    %    - isOfferAlign : 1 if the user should be offered to align MEG in SCS using the new fiducials
+    strWarn = '';
+    isOfferAlign = 0;
+    % Does the MEG have the "Native=>Brainstorm/CTF" transformation?
+    if isfield(ChannelMat, 'TransfMegLabels') && iscell(ChannelMat.TransfMegLabels) && ~isempty(ChannelMat.TransfMegLabels)
+        hasCtfTransf = ismember('Native=>Brainstorm/CTF', ChannelMat.TransfMegLabels);
+    else
+        hasCtfTransf = 0;
+    end
+    % Detect anatomical fiducials (NAS/LPA/RPA) in the imported head points
+    hasFiducials = 0;
+    if isfield(HeadPoints, 'Label') && isfield(HeadPoints, 'Loc') && ~isempty(HeadPoints.Label) && (size(HeadPoints.Loc, 2) == length(HeadPoints.Label))
+        iNas = find(strcmpi(HeadPoints.Label, 'Nasion') | strcmpi(HeadPoints.Label, 'NAS'));
+        iLpa = find(strcmpi(HeadPoints.Label, 'Left')   | strcmpi(HeadPoints.Label, 'LPA'));
+        iRpa = find(strcmpi(HeadPoints.Label, 'Right')  | strcmpi(HeadPoints.Label, 'RPA'));
+        hasFiducials = ~isempty(iNas) && ~isempty(iLpa) && ~isempty(iRpa);
+    end
+    % MEG in "Native" coordinates, fiducials available: propose to align in SCS
+    if hasFiducials && ~hasCtfTransf
+        strWarn = ['WARNING: The MEG sensors are in "Native" coordinates and do not have the ' 10 ...
+                   '"Native=>Brainstorm/CTF" transformation, so the digitized fiducials were NOT ' 10 ...
+                   'used to align the MEG sensors with the anatomy, and the MEG sensors are likely ' 10 ...
+                   'misaligned. The MEG coordinate system cannot be updated from the head points only.' 10 ...
+                   'Recommended: re-import the MEG data with a single .pos file that contains both ' 10 ...
+                   'the head coils (HPI-N/L/R) and the anatomical fiducials (NAS/LPA/RPA).'];
+        isOfferAlign = 1;
+    % MEG in "Native" coordinates, no fiducials available: warn only
+    elseif ~hasCtfTransf
+        strWarn = ['WARNING: The MEG sensors are in "Native" coordinates and do not have the ' 10 ...
+                   '"Native=>Brainstorm/CTF" transformation. The new head points do NOT contain ' 10 ...
+                   'anatomical fiducials (NAS/LPA/RPA), so the MEG coordinate system cannot be ' 10 ...
+                   'aligned based on them.'];
+    % MEG already in SCS, fiducials available: warn that the new SCS may differ
+    elseif hasFiducials
+        strWarn = ['Warning: The new head points contain anatomical fiducials (NAS/LPA/RPA) that ' 10 ...
+                   'may define a different SCS than the one currently used for the MEG sensors. ' 10 ...
+                   'The MEG sensors were NOT re-aligned, and may be misaligned with the anatomy. ' 10 ...
+                   'Recommended: re-import the MEG data with the correct single .pos file, or check ' 10 ...
+                   'the "Native=>Brainstorm/CTF" transformation of the channel file.'];
+    end
+end
+
+
+%% ===== ALIGN MEG TO SCS =====
+function ChannelMat = AlignMegToScs(ChannelMat, HeadPoints)
+    % ALIGN_MEG_TO_SCS: Re-define the SCS coordinate system of the channel file from the anatomical
+    % fiducials (NAS/LPA/RPA) contained in the new head points, and re-align the MEG sensors and
+    % head points in SCS accordingly. This adds (or updates) the "Native=>Brainstorm/CTF"
+    % transformation to the channel file.
+    % If the fiducials are not all present in HeadPoints, the channel file is returned unchanged.
+
+    % Get the three anatomical fiducials
+    if ~isfield(HeadPoints, 'Label') || ~isfield(HeadPoints, 'Loc') || isempty(HeadPoints.Label) || (size(HeadPoints.Loc, 2) ~= length(HeadPoints.Label))
+        return;
+    end
+    iNas = find(strcmpi(HeadPoints.Label, 'Nasion') | strcmpi(HeadPoints.Label, 'NAS'));
+    iLpa = find(strcmpi(HeadPoints.Label, 'Left')   | strcmpi(HeadPoints.Label, 'LPA'));
+    iRpa = find(strcmpi(HeadPoints.Label, 'Right')  | strcmpi(HeadPoints.Label, 'RPA'));
+    % If all the fiducials are present: compute the transformation and re-align
+    if ~isempty(iNas) && ~isempty(iLpa) && ~isempty(iRpa)
+        % Safety: only apply this when the MEG has not been aligned in SCS yet. Re-aligning sensors
+        % that are already in SCS would apply the transformation twice and misalign them.
+        if isfield(ChannelMat, 'TransfMegLabels') && iscell(ChannelMat.TransfMegLabels) && ~isempty(ChannelMat.TransfMegLabels) && ismember('Native=>Brainstorm/CTF', ChannelMat.TransfMegLabels)
+            return;
+        end
+        % Define SCS from the digitized fiducials (positions are in meters)
+        ChannelMat.SCS.NAS = mean(HeadPoints.Loc(:,iNas)', 1);
+        ChannelMat.SCS.LPA = mean(HeadPoints.Loc(:,iLpa)', 1);
+        ChannelMat.SCS.RPA = mean(HeadPoints.Loc(:,iRpa)', 1);
+        % Re-align sensors and head points in SCS, and add the "Native=>Brainstorm/CTF" transformation
+        ChannelMat = channel_detect_type(ChannelMat, 1, 0);
+    end
 end
 
 
