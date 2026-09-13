@@ -131,7 +131,10 @@ pos_file = [];
 if (length(posDir) == 1)
     pos_file = bst_fullfile(ds_directory, posDir(1).name);
 elseif (length(posDir) > 1)
-    error('Two Polhemus files in the same folder.');
+    % Multiple Polhemus files in the same folder: select the one with all the anatomical
+    % fiducials and the most digitized points (see select_pos_file for details)
+    posFiles = cellfun(@(c)bst_fullfile(ds_directory, c), {posDir.name}, 'UniformOutput', 0);
+    pos_file = select_pos_file('SelectPosFile', posFiles, verbose);
 % Check for BIDS version: .pos is in the same folder as the .ds
 else
     % Attempt #1: sub-subid_headshape.pos
