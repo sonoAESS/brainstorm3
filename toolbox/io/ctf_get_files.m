@@ -132,9 +132,15 @@ if (length(posDir) == 1)
     pos_file = bst_fullfile(ds_directory, posDir(1).name);
 elseif (length(posDir) > 1)
     % Multiple Polhemus files in the same folder: select the one with all the anatomical
-    % fiducials and the most digitized points (see select_pos_file for details)
+    % fiducials and the most digitized points (see select_pos_file for details).
+    % In an interactive session (Brainstorm GUI running), ask the user to confirm the automatic
+    % selection; in batch/headless mode the selection is automatic and deterministic.
+    global GlobalData;
+    isInteractive = (verbose >= 1) && ~isempty(GlobalData) && isstruct(GlobalData) && ...
+                    isfield(GlobalData, 'Program') && isfield(GlobalData.Program, 'GuiLevel') && ...
+                    (GlobalData.Program.GuiLevel >= 0);
     posFiles = cellfun(@(c)bst_fullfile(ds_directory, c), {posDir.name}, 'UniformOutput', 0);
-    pos_file = select_pos_file('SelectPosFile', posFiles, verbose);
+    pos_file = select_pos_file('SelectPosFile', posFiles, verbose, isInteractive);
 % Check for BIDS version: .pos is in the same folder as the .ds
 else
     % Attempt #1: sub-subid_headshape.pos

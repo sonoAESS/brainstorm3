@@ -32,47 +32,66 @@ end
 
 
 %% ===== SELECT POS FILE =====
-function pos_file = SelectPosFile(posFiles, verbose)
+function pos_file = SelectPosFile(posFiles, verbose, isInteractive)
     % SELECT_POS_FILE: Select the best .pos file among the given candidates.
     %
     % INPUT:
-    %    - posFiles : Cell array of full paths to the .pos candidate files
-    %    - verbose  : If 1, display the selection in the command window
+    %    - posFiles      : Cell array of full paths to the .pos candidate files
+    %    - verbose       : If 1, display the selection in the command window
+    %    - isInteractive : If 1, ask the user to confirm/change the selection in a dialog box,
+    %                      with the best-scored file pre-selected. Optional, default: 0 (the
+    %                      best-scored file is selected automatically, deterministically).
     % OUTPUT:
-    %    - pos_file : Full path to the selected file, or [] if no file could be read
+    %    - pos_file      : Full path to the selected file, or [] if no file could be read
     pos_file = [];
     % Parse inputs
     if (nargin < 2) || isempty(verbose)
         verbose = 1;
     end
+    if (nargin < 3) || isempty(isInteractive)
+        isInteractive = 0;
+    end
     if ischar(posFiles)
         posFiles = {posFiles};
     end
     % Loop on all the candidate files
-    bestScore = -1;
-    bestFile = [];
+    scores = -ones(1, length(posFiles));
     for i = 1:length(posFiles)
         % Try to read the file (skip the ones that cannot be read)
         try
             ChannelMat = in_channel_pos(posFiles{i});
-            score = select_pos_file('ScorePosFile', ChannelMat);
+            scores(i) = select_pos_file('ScorePosFile', ChannelMat);
         catch
-            score = -1;
+            scores(i) = -1;
             disp(['CTF> Warning: Could not read the Polhemus file, ignoring: ' posFiles{i}]);
         end
-        % Keep the best scored file (strictly better, to keep the selection deterministic)
-        if (score > bestScore)
-            bestScore = score;
-            bestFile = posFiles{i};
+    end
+    % None of the files could be read: nothing to select
+    if all(scores < 0)
+        disp('CTF> Warning: None of the Polhemus files could be read, no head points will be imported.');
+        return;
+    end
+    % Select the best scored file (strictly better, to keep the selection deterministic)
+    [bestScore, iBest] = max(scores);
+    pos_file = posFiles{iBest};
+    % Interactive session: let the user confirm the automatic selection, or choose another file.
+    % In batch/headless mode the best-scored file is selected automatically.
+    if isInteractive && (length(posFiles) > 1)
+        dialogMsg = ['Multiple .pos (Polhemus) files were found in the dataset folder. ' ...
+                     'The file recommended below is the one most likely to contain the complete ' ...
+                     'digitization of the head (the highest score). ' ...
+                     'Please confirm this file, or select another one if needed.'];
+        iChoice = java_dialog('radio', dialogMsg, 'Select the .pos file to import', [], posFiles, iBest);
+        % If the user cancelled the dialog: keep the automatic selection
+        if ~isempty(iChoice)
+            pos_file = posFiles{iChoice};
+            bestScore = scores(iChoice);
         end
     end
     % Report the selection
-    if ~isempty(bestFile)
-        pos_file = bestFile;
-        if verbose
-            disp(['CTF> Multiple .pos files found, selected: ' bestFile ' (score: ' num2str(bestScore) ')']);
-            disp('BST> Warning: Please verify that the selected .pos file is the correct one.');
-        end
+    if verbose
+        disp(['CTF> Multiple .pos files found, selected: ' pos_file ' (score: ' num2str(bestScore) ')']);
+        disp('BST> Warning: Please verify that the selected .pos file is the correct one.');
     end
 end
 
@@ -81,8 +100,9 @@ end
 function score = ScorePosFile(ChannelMat)
     % SCORE_POS_FILE: Score a digitized head points file, to select which file is the most likely
     % to contain the complete digitization of the head.
-    % Heuristics (deterministic):
-    %    +100 for each anatomical fiducial (NAS/LPA/RPA)
+    % Heuristics (deterministic; the largest weight guarantees that a file with the anatomical
+    % fiducials always beats a file with only digitized points):
+    %   +1000 for each anatomical fiducial (NAS/LPA/RPA)
     %     +10 for each MEG head coil (HPI-N/L/R)
     %      +1 for each additional digitized point
     % INPUT:
@@ -93,10 +113,10 @@ function score = ScorePosFile(ChannelMat)
     % Head points
     if isfield(ChannelMat, 'HeadPoints') && isfield(ChannelMat.HeadPoints, 'Label') && isfield(ChannelMat.HeadPoints, 'Loc') && ~isempty(ChannelMat.HeadPoints.Label)
         labels = ChannelMat.HeadPoints.Label;
-        % +100 for each anatomical fiducial
-        score = score + 100 * any(strcmpi(labels, 'Nasion') | strcmpi(labels, 'NAS'));
-        score = score + 100 * any(strcmpi(labels, 'Left')   | strcmpi(labels, 'LPA'));
-        score = score + 100 * any(strcmpi(labels, 'Right')  | strcmpi(labels, 'RPA'));
+        % +1000 for each anatomical fiducial
+        score = score + 1000 * any(strcmpi(labels, 'Nasion') | strcmpi(labels, 'NAS'));
+        score = score + 1000 * any(strcmpi(labels, 'Left')   | strcmpi(labels, 'LPA'));
+        score = score + 1000 * any(strcmpi(labels, 'Right')  | strcmpi(labels, 'RPA'));
         % +10 for each MEG head coil
         score = score + 10 * sum(strcmpi(labels, 'HPI-N') | strcmpi(labels, 'HPI-L') | strcmpi(labels, 'HPI-R'));
         % +1 for each digitized point
