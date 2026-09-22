@@ -81,9 +81,12 @@ ChannelMatNative.Channel = struct('Name', {'MEG 1'}, 'Type', {'MEG'}, 'Loc', {[0
 % Head points with the three anatomical fiducials AND the three head coils (positions in meters):
 % both sets must be present, a single set of markers is assumed to be head coils (older datasets)
 HeadPointsFid = struct();
-HeadPointsFid.Loc   = [0.00, 0.10, 0.10, 0.00, 0.11, 0.12; ...
-                      -0.07, 0.00, 0.02, -0.08, 0.01, 0.03; ...
-                       0.07, 0.00, 0.02,  0.08, 0.01, 0.03]';
+HeadPointsFid.Loc   = [ 0.00, 0.10, 0.10;    % NAS
+                       -0.07, 0.00, 0.02;    % LPA
+                        0.07, 0.00, 0.02;    % RPA
+                        0.00, 0.11, 0.12;    % HPI-N
+                       -0.08, 0.01, 0.03;    % HPI-L
+                        0.08, 0.01, 0.03]';  % HPI-R
 HeadPointsFid.Label = {'NAS', 'LPA', 'RPA', 'HPI-N', 'HPI-L', 'HPI-R'};
 HeadPointsFid.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL', 'HPI', 'HPI', 'HPI'};
 % Case 1a: native coordinates + fiducials => warning + offer to align
@@ -235,9 +238,12 @@ else
     % Head points with the anatomical fiducials AND the head coils (same native reference frame,
     % positions in meters): both sets are required for the alignment to be proposed
     HeadPoints = struct();
-    HeadPoints.Loc   = [0.00, 0.10, 0.10, 0.00, 0.11, 0.12; ...
-                       -0.07, 0.00, 0.02, -0.08, 0.01, 0.03; ...
-                        0.07, 0.00, 0.02,  0.08, 0.01, 0.03]';
+    HeadPoints.Loc   = [ 0.00, 0.10, 0.10;    % NAS
+                        -0.07, 0.00, 0.02;    % LPA
+                         0.07, 0.00, 0.02;    % RPA
+                         0.00, 0.11, 0.12;    % HPI-N
+                        -0.08, 0.01, 0.03;    % HPI-L
+                         0.08, 0.01, 0.03]';  % HPI-R
     HeadPoints.Label = {'NAS', 'LPA', 'RPA', 'HPI-N', 'HPI-L', 'HPI-R'};
     HeadPoints.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL', 'HPI', 'HPI', 'HPI'};
     % Pre-merge the head points in the channel file, as AddHeadpoints() does before proposing the alignment
