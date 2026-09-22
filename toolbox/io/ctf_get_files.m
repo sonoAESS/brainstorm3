@@ -136,39 +136,44 @@ end
 
 % Get dataset name and path
 [dspath, dsname] = bst_fileparts(ds_directory);
-% Return polhemus file
-pos_file = [];
+% Candidate head shape files for this dataset (several are possible)
+posCandidates = [];
 if (length(posDir) == 1)
-    pos_file = bst_fullfile(ds_directory, posDir(1).name);
+    posCandidates = {bst_fullfile(ds_directory, posDir(1).name)};
 elseif (length(posDir) > 1)
-    % Multiple Polhemus files in the same folder: select the best one (see select_pos_file
-    % for details). In an interactive session, ask the user to confirm the automatic
-    % selection; in batch/headless mode the selection is automatic and deterministic.
-    posFiles = cellfun(@(c)bst_fullfile(ds_directory, c), {posDir.name}, 'UniformOutput', 0);
-    pos_file = select_pos_file('SelectPosFile', posFiles, verbose, isInteractive);
+    % Several Polhemus files in the same folder
+    posCandidates = cellfun(@(c)bst_fullfile(ds_directory, c), {posDir.name}, 'UniformOutput', 0);
 % Check for BIDS version: .pos is in the same folder as the .ds
 else
     % Attempt #1: sub-subid_headshape.pos
     iUnder = find(dsname == '_', 1);
     if ~isempty(iUnder) && (iUnder > 1) && file_exist(bst_fullfile(dspath, [dsname(1:iUnder-1), '_headshape.pos']))
-        pos_file = bst_fullfile(dspath, [dsname(1:iUnder-1), '_headshape.pos']);
+        posCandidates = {bst_fullfile(dspath, [dsname(1:iUnder-1), '_headshape.pos'])};
     end
     % Attempt #2: Any .pos with a name that starts with the .ds name (excluded "_meg")
-    if isempty(pos_file)
+    if isempty(posCandidates)
         posDir = dir(strrep(ds_directory, '_meg.ds', '_*.pos'));
-        if (length(posDir) == 1)
-            pos_file = bst_fullfile(dspath, posDir(1).name);
+        if ~isempty(posDir)
+            posCandidates = cellfun(@(c)bst_fullfile(dspath, c), {posDir.name}, 'UniformOutput', 0);
         end
     end
     % Attempt #3: Any .pos with a name that starts with the subject id
-    if isempty(pos_file)
+    % (e.g. BIDS: sub-subid_ses-sesid_headshape.pos and sub-subid_ses-sesid_electrodes.pos
+    %  next to the .ds folder)
+    if isempty(posCandidates)
         posDir = dir(bst_fullfile(dspath, [dsname(1:iUnder-1), '*.pos']));
-        if (length(posDir) == 1)
-            pos_file = bst_fullfile(dspath, posDir(1).name);
-        elseif (length(posDir) >= 2) && verbose
-            disp(['CTF> Warning: Multiple .pos head shape points found in: ' dspath]);
+        if ~isempty(posDir)
+            posCandidates = cellfun(@(c)bst_fullfile(dspath, c), {posDir.name}, 'UniformOutput', 0);
         end
     end
+end
+% Select the head shape file: if several candidates are found, pick the best one
+% (see select_pos_file for details); interactive sessions confirm with the user.
+pos_file = [];
+if (length(posCandidates) == 1)
+    pos_file = posCandidates{1};
+elseif (length(posCandidates) > 1)
+    pos_file = select_pos_file('SelectPosFile', posCandidates, verbose, isInteractive);
 end
 
 % Report which file is used
