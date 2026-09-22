@@ -6,8 +6,11 @@ function varargout = select_pos_file(varargin)
 %
 % When several .pos files are available for the same CTF dataset, Brainstorm cannot know which one
 % to use. This function picks, in a deterministic way, the file that is most likely to contain the
-% complete digitization: it has all the anatomical fiducials (NAS/LPA/RPA), the most head coils
-% (HPI-N/L/R) and the most digitized points. A clear message is displayed for the user.
+% complete digitization of the head. Three point types are considered (electrodes are ignored,
+% they are read as EEG channels): the anatomical fiducials (NAS/LPA/RPA), the MEG head coils
+% (HPI-N/L/R) and the digitized points. Files are ranked by combination of types (fiducials +
+% coils + points first) and, within the same combination, by the number of head points.
+% A clear message is displayed for the user.
 
 % @=============================================================================
 % This function is part of the Brainstorm software:
@@ -54,7 +57,7 @@ function pos_file = SelectPosFile(posFiles, verbose, isInteractive)
     if ischar(posFiles)
         posFiles = {posFiles};
     end
-    % Loop on all the candidate files
+    % Loop on all the candidate files (-1: unreadable file or unusable combination of point types)
     scores = -ones(1, length(posFiles));
     for i = 1:length(posFiles)
         % Try to read the file (skip the ones that cannot be read)
@@ -66,21 +69,32 @@ function pos_file = SelectPosFile(posFiles, verbose, isInteractive)
             disp(['CTF> Warning: Could not read the Polhemus file, ignoring: ' posFiles{i}]);
         end
     end
-    % None of the files could be read: nothing to select
-    if all(scores < 0)
-        disp('CTF> Warning: None of the Polhemus files could be read, no head points will be imported.');
-        return;
-    end
-    % Select the best scored file (strictly better, to keep the selection deterministic)
+    % No usable file: in batch/headless mode import nothing, interactive sessions still let
+    % the user pick a file manually (nothing is recommended in that case).
     [bestScore, iBest] = max(scores);
+    if (bestScore < 0)
+        if ~isInteractive
+            disp(['CTF> Warning: No usable .pos file (readable, with at least two point types among ' ...
+                  'anatomical fiducials, MEG head coils and digitized points), no head points will be imported.']);
+            return;
+        end
+        % Pre-select the first file, without any recommendation
+        iBest = 1;
+    end
     pos_file = posFiles{iBest};
     % Interactive session: let the user confirm the automatic selection, or choose another file.
     % In batch/headless mode the best-scored file is selected automatically.
     if isInteractive && (length(posFiles) > 1)
-        dialogMsg = ['Multiple .pos (Polhemus) files were found in the dataset folder. ' ...
-                     'The file recommended below is the one most likely to contain the complete ' ...
-                     'digitization of the head (the highest score). ' ...
-                     'Please confirm this file, or select another one if needed.'];
+        if (bestScore >= 0)
+            dialogMsg = ['Multiple .pos (Polhemus) files were found in the dataset folder. ' ...
+                         'The file recommended below has the best combination of point types ' ...
+                         '(anatomical fiducials, MEG head coils and digitized points). ' ...
+                         'Please confirm this file, or select another one if needed.'];
+        else
+            dialogMsg = ['Multiple .pos (Polhemus) files were found in the dataset folder, ' ...
+                         'but none contains a usable combination of point types. ' ...
+                         'Please select the file to import manually.'];
+        end
         iChoice = java_dialog('radio', dialogMsg, 'Select the .pos file to import', [], posFiles, iBest);
         % If the user cancelled the dialog: keep the automatic selection
         if ~isempty(iChoice)
@@ -90,7 +104,11 @@ function pos_file = SelectPosFile(posFiles, verbose, isInteractive)
     end
     % Report the selection
     if verbose
-        disp(['CTF> Multiple .pos files found, selected: ' pos_file ' (score: ' num2str(bestScore) ')']);
+        if (bestScore >= 0)
+            disp(['CTF> Multiple .pos files found, selected: ' pos_file ' (score: ' num2str(bestScore) ')']);
+        else
+            disp(['CTF> Multiple .pos files found, no file is fully usable, selected: ' pos_file]);
+        end
         disp('BST> Warning: Please verify that the selected .pos file is the correct one.');
     end
 end
@@ -98,28 +116,54 @@ end
 
 %% ===== SCORE POS FILE =====
 function score = ScorePosFile(ChannelMat)
-    % SCORE_POS_FILE: Score a digitized head points file, to select which file is the most likely
+    % SCORE_POS_FILE: Rank a digitized head points file, to select which file is the most likely
     % to contain the complete digitization of the head.
-    % Heuristics (deterministic; the largest weight guarantees that a file with the anatomical
-    % fiducials always beats a file with only digitized points):
-    %   +1000 for each anatomical fiducial (NAS/LPA/RPA)
-    %     +10 for each MEG head coil (HPI-N/L/R)
-    %      +1 for each additional digitized point
+    % Three point types are considered, ignoring the electrodes (EEG channels):
+    %   - the complete set of anatomical fiducials (NAS, LPA and RPA)
+    %   - the complete set of MEG head coils (HPI-N, HPI-L and HPI-R)
+    %   - the digitized points (any other head point)
+    % The score encodes first the rank of the combination of types present (a file with only a
+    % single type cannot be used and gets -1), then the total number of head points, used only
+    % to break ties between files with the same combination:
+    %   4e6 + nPoints : fiducials + coils + digitized points (complete digitization, best)
+    %   3e6 + nPoints : coils + digitized points
+    %   2e6 + nPoints : fiducials + digitized points
+    %   1e6 + nPoints : fiducials + coils (no digitized points)
+    %          -1     : unusable (0 or 1 point type, or file without head points)
     % INPUT:
     %    - ChannelMat : Channel structure read from a .pos file (in_channel_pos)
     % OUTPUT:
-    %    - score      : Sum of the weighted components listed above
-    score = 0;
+    %    - score      : Combination-based score described above
+    score = -1;
     % Head points
-    if isfield(ChannelMat, 'HeadPoints') && isfield(ChannelMat.HeadPoints, 'Label') && isfield(ChannelMat.HeadPoints, 'Loc') && ~isempty(ChannelMat.HeadPoints.Label)
-        labels = ChannelMat.HeadPoints.Label;
-        % +1000 for each anatomical fiducial
-        score = score + 1000 * any(strcmpi(labels, 'Nasion') | strcmpi(labels, 'NAS'));
-        score = score + 1000 * any(strcmpi(labels, 'Left')   | strcmpi(labels, 'LPA'));
-        score = score + 1000 * any(strcmpi(labels, 'Right')  | strcmpi(labels, 'RPA'));
-        % +10 for each MEG head coil
-        score = score + 10 * sum(strcmpi(labels, 'HPI-N') | strcmpi(labels, 'HPI-L') | strcmpi(labels, 'HPI-R'));
-        % +1 for each digitized point
-        score = score + length(labels);
+    if ~isfield(ChannelMat, 'HeadPoints') || ~isfield(ChannelMat.HeadPoints, 'Label') || ...
+            ~isfield(ChannelMat.HeadPoints, 'Loc') || isempty(ChannelMat.HeadPoints.Label)
+        return;
     end
+    labels = ChannelMat.HeadPoints.Label;
+    % Complete anatomical fiducial set (NAS/LPA/RPA, under their various names)
+    isNas = strcmpi(labels, 'Nasion') | strcmpi(labels, 'NAS');
+    isLpa = strcmpi(labels, 'Left')   | strcmpi(labels, 'LPA');
+    isRpa = strcmpi(labels, 'Right')  | strcmpi(labels, 'RPA');
+    hasFid = any(isNas) && any(isLpa) && any(isRpa);
+    % Complete MEG head coil set (HPI-N/L/R)
+    isCoil = strcmpi(labels, 'HPI-N') | strcmpi(labels, 'HPI-L') | strcmpi(labels, 'HPI-R');
+    hasCoil = any(strcmpi(labels, 'HPI-N')) && any(strcmpi(labels, 'HPI-L')) && any(strcmpi(labels, 'HPI-R'));
+    % Digitized points: head points that are neither fiducials nor head coils
+    hasPoints = any(~(isNas | isLpa | isRpa | isCoil));
+    % Rank the combination of point types present
+    if hasFid && hasCoil && hasPoints
+        combination = 4;
+    elseif hasCoil && hasPoints
+        combination = 3;
+    elseif hasFid && hasPoints
+        combination = 2;
+    elseif hasFid && hasCoil
+        combination = 1;
+    else
+        % A single type (or none) cannot be used to define the head geometry
+        return;
+    end
+    % Tie-breaker within the same combination: the total number of head points
+    score = combination * 1e6 + length(labels);
 end

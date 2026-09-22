@@ -111,22 +111,51 @@ assert(isOfferAlign == 0, 'Test 1e: expected no alignment offer without MEG chan
 fprintf('Test 1 (GetMegAlignWarning): passed\n');
 
 %% ===== TEST 2: SCORE_POS_FILE =====
-% File with all the anatomical fiducials, the head coils and extra points
+% File with all the anatomical fiducials, the head coils and extra points (combination 4)
 ChannelMatBest = struct();
 ChannelMatBest.HeadPoints.Label = {'NAS', 'LPA', 'RPA', 'HPI-N', 'HPI-L', 'HPI-R', 'EXTRA', 'EXTRA'};
 ChannelMatBest.HeadPoints.Loc   = zeros(3, 8);
 ChannelMatBest.HeadPoints.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL', 'HPI', 'HPI', 'HPI', 'EXTRA', 'EXTRA'};
 scoreBest = select_pos_file('ScorePosFile', ChannelMatBest);
-assert(scoreBest == 3038, 'Test 2a: expected score 3038, got %d', scoreBest);
-% File with only digitized points
+assert(scoreBest == 4e6 + 8, 'Test 2a: expected score %d, got %d', 4e6 + 8, scoreBest);
+% File with only digitized points: a single type cannot be used
 ChannelMatPoints = struct();
 ChannelMatPoints.HeadPoints.Label = {'EXTRA', 'EXTRA', 'EXTRA'};
 ChannelMatPoints.HeadPoints.Loc   = zeros(3, 3);
 ChannelMatPoints.HeadPoints.Type  = {'EXTRA', 'EXTRA', 'EXTRA'};
 scorePoints = select_pos_file('ScorePosFile', ChannelMatPoints);
-assert(scorePoints == 3, 'Test 2b: expected score 3, got %d', scorePoints);
-% Empty channel file
-assert(select_pos_file('ScorePosFile', struct()) == 0, 'Test 2c: expected score 0');
+assert(scorePoints == -1, 'Test 2b: expected score -1, got %d', scorePoints);
+% Empty channel file: unusable
+assert(select_pos_file('ScorePosFile', struct()) == -1, 'Test 2c: expected score -1');
+% Head coils + digitized points (combination 3), no anatomical fiducials
+ChannelMatCoils = struct();
+ChannelMatCoils.HeadPoints.Label = {'HPI-N', 'HPI-L', 'HPI-R', 'EXTRA'};
+ChannelMatCoils.HeadPoints.Loc   = zeros(3, 4);
+ChannelMatCoils.HeadPoints.Type  = {'HPI', 'HPI', 'HPI', 'EXTRA'};
+scoreCoils = select_pos_file('ScorePosFile', ChannelMatCoils);
+assert(scoreCoils == 3e6 + 4, 'Test 2d: expected score %d, got %d', 3e6 + 4, scoreCoils);
+% Anatomical fiducials + digitized points (combination 2), no head coils
+ChannelMatFid = struct();
+ChannelMatFid.HeadPoints.Label = {'NAS', 'LPA', 'RPA', 'EXTRA'};
+ChannelMatFid.HeadPoints.Loc   = zeros(3, 4);
+ChannelMatFid.HeadPoints.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL', 'EXTRA'};
+scoreFid = select_pos_file('ScorePosFile', ChannelMatFid);
+assert(scoreFid == 2e6 + 4, 'Test 2e: expected score %d, got %d', 2e6 + 4, scoreFid);
+% Fiducials + head coils without digitized points (combination 1)
+ChannelMatNoPoints = struct();
+ChannelMatNoPoints.HeadPoints.Label = {'NAS', 'LPA', 'RPA', 'HPI-N', 'HPI-L', 'HPI-R'};
+ChannelMatNoPoints.HeadPoints.Loc   = zeros(3, 6);
+ChannelMatNoPoints.HeadPoints.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL', 'HPI', 'HPI', 'HPI'};
+scoreNoPoints = select_pos_file('ScorePosFile', ChannelMatNoPoints);
+assert(scoreNoPoints == 1e6 + 6, 'Test 2f: expected score %d, got %d', 1e6 + 6, scoreNoPoints);
+% Repeated fiducial measurements must not raise the combination rank
+ChannelMatDup = ChannelMatFid;
+ChannelMatDup.HeadPoints.Label = {'NAS', 'LPA', 'RPA', 'NAS', 'EXTRA'};
+ChannelMatDup.HeadPoints.Loc   = zeros(3, 5);
+ChannelMatDup.HeadPoints.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL', 'CARDINAL', 'EXTRA'};
+scoreDup = select_pos_file('ScorePosFile', ChannelMatDup);
+assert(scoreDup == 2e6 + 5, 'Test 2g: expected score %d, got %d', 2e6 + 5, scoreDup);
+assert(scoreDup < scoreCoils, 'Test 2h: a duplicated fiducial must not beat coils + points');
 fprintf('Test 2 (ScorePosFile): passed\n');
 
 %% ===== TEST 3: SELECT_POS_FILE (integration, requires Brainstorm) =====
