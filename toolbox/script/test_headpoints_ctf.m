@@ -78,11 +78,14 @@ ChannelMatNative.TransfMegLabels = {};
 ChannelMatNative.TransfEeg = {};
 ChannelMatNative.TransfEegLabels = {};
 ChannelMatNative.Channel = struct('Name', {'MEG 1'}, 'Type', {'MEG'}, 'Loc', {[0; 0; 0.5]}, 'Orient', {[]});
-% Head points with the three anatomical fiducials (positions in meters)
+% Head points with the three anatomical fiducials AND the three head coils (positions in meters):
+% both sets must be present, a single set of markers is assumed to be head coils (older datasets)
 HeadPointsFid = struct();
-HeadPointsFid.Loc   = [0.00, 0.10, 0.10; -0.07, 0.00, 0.02; 0.07, 0.00, 0.02]';
-HeadPointsFid.Label = {'NAS', 'LPA', 'RPA'};
-HeadPointsFid.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL'};
+HeadPointsFid.Loc   = [0.00, 0.10, 0.10, 0.00, 0.11, 0.12; ...
+                      -0.07, 0.00, 0.02, -0.08, 0.01, 0.03; ...
+                       0.07, 0.00, 0.02,  0.08, 0.01, 0.03]';
+HeadPointsFid.Label = {'NAS', 'LPA', 'RPA', 'HPI-N', 'HPI-L', 'HPI-R'};
+HeadPointsFid.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL', 'HPI', 'HPI', 'HPI'};
 % Case 1a: native coordinates + fiducials => warning + offer to align
 [strWarn, isOfferAlign] = process_headpoints_add('GetMegAlignWarning', ChannelMatNative, HeadPointsFid);
 assert(~isempty(strWarn), 'Test 1a: expected a warning when MEG is in native coordinates and fiducials are added');
@@ -108,6 +111,22 @@ ChannelMatEeg.Channel = struct('Name', {'EEG 1'}, 'Type', {'EEG'}, 'Loc', {[0; 0
 [strWarn, isOfferAlign] = process_headpoints_add('GetMegAlignWarning', ChannelMatEeg, HeadPointsFid);
 assert(isempty(strWarn), 'Test 1e: expected no warning when there is no MEG channel');
 assert(isOfferAlign == 0, 'Test 1e: expected no alignment offer without MEG channels');
+% Case 1f: native coordinates + a single set of markers (assumed head coils) => warning only
+HeadPointsCoilsOnly = struct();
+HeadPointsCoilsOnly.Loc   = HeadPointsFid.Loc(:, 4:6);
+HeadPointsCoilsOnly.Label = {'HPI-N', 'HPI-L', 'HPI-R'};
+HeadPointsCoilsOnly.Type  = {'HPI', 'HPI', 'HPI'};
+[strWarn, isOfferAlign] = process_headpoints_add('GetMegAlignWarning', ChannelMatNative, HeadPointsCoilsOnly);
+assert(~isempty(strWarn), 'Test 1f: expected a warning when MEG is in native coordinates');
+assert(isOfferAlign == 0, 'Test 1f: a single set of markers (assumed coils) must not offer an alignment');
+% Case 1g: legacy data: a single set labeled like the anatomical fiducials (assumed head coils)
+HeadPointsLegacy = struct();
+HeadPointsLegacy.Loc   = HeadPointsFid.Loc(:, 1:3);
+HeadPointsLegacy.Label = {'NAS', 'LPA', 'RPA'};
+HeadPointsLegacy.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL'};
+[strWarn, isOfferAlign] = process_headpoints_add('GetMegAlignWarning', ChannelMatNative, HeadPointsLegacy);
+assert(~isempty(strWarn), 'Test 1g: expected a warning when MEG is in native coordinates');
+assert(isOfferAlign == 0, 'Test 1g: a legacy single set (assumed coils) must not offer an alignment');
 fprintf('Test 1 (GetMegAlignWarning): passed\n');
 
 %% ===== TEST 2: SCORE_POS_FILE =====
@@ -212,11 +231,15 @@ else
     ChannelMat.Channel.Orient = [];
     ChannelMat.TransfMeg = {};                  % No "Native=>Brainstorm/CTF" transformation
     ChannelMat.TransfMegLabels = {};
-    % Head points with the anatomical fiducials (same native reference frame, positions in meters)
+    ChannelMatNative = ChannelMat;               % Fresh native copy for the negative cases below
+    % Head points with the anatomical fiducials AND the head coils (same native reference frame,
+    % positions in meters): both sets are required for the alignment to be proposed
     HeadPoints = struct();
-    HeadPoints.Loc   = [0.00, 0.10, 0.10; -0.07, 0.00, 0.02; 0.07, 0.00, 0.02]';
-    HeadPoints.Label = {'NAS', 'LPA', 'RPA'};
-    HeadPoints.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL'};
+    HeadPoints.Loc   = [0.00, 0.10, 0.10, 0.00, 0.11, 0.12; ...
+                       -0.07, 0.00, 0.02, -0.08, 0.01, 0.03; ...
+                        0.07, 0.00, 0.02,  0.08, 0.01, 0.03]';
+    HeadPoints.Label = {'NAS', 'LPA', 'RPA', 'HPI-N', 'HPI-L', 'HPI-R'};
+    HeadPoints.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL', 'HPI', 'HPI', 'HPI'};
     % Pre-merge the head points in the channel file, as AddHeadpoints() does before proposing the alignment
     ChannelMat.HeadPoints = HeadPoints;
     % Align the MEG sensors in SCS
@@ -233,13 +256,28 @@ else
     ChannelMat = process_headpoints_add('AlignMegToScs', ChannelMat, HeadPoints);
     assert(isequal(ChannelMat.Channel.Loc, LocAfterFirstAlign), 'Test 4c: expected the sensor position to stay the same when called again');
     assert(numel(find(strcmp(ChannelMat.TransfMegLabels, 'Native=>Brainstorm/CTF'))) == 1, 'Test 4d: expected only one "Native=>Brainstorm/CTF" transformation');
-    % Missing fiducials: the channel file must be returned unchanged
+    % Missing fiducials: the channel file must be returned unchanged (fresh native channel,
+    % so the check is on the fiducials, not on the "already aligned" safety guard)
     HeadPointsNoFid = struct();
     HeadPointsNoFid.Loc   = [0.01; 0.02; 0.03];
     HeadPointsNoFid.Label = {'EXTRA'};
     HeadPointsNoFid.Type  = {'EXTRA'};
-    ChannelMatNoFid = process_headpoints_add('AlignMegToScs', ChannelMat, HeadPointsNoFid);
-    assert(isequal(ChannelMatNoFid, ChannelMat), 'Test 4h: expected the channel file to be unchanged when fiducials are missing');
+    ChannelMatNoFid = process_headpoints_add('AlignMegToScs', ChannelMatNative, HeadPointsNoFid);
+    assert(isequal(ChannelMatNoFid, ChannelMatNative), 'Test 4h: expected the channel file to be unchanged when fiducials are missing');
+    % Single set of markers (assumed head coils, e.g. coils-only file): unchanged too
+    HeadPointsCoilsOnly = struct();
+    HeadPointsCoilsOnly.Loc   = HeadPoints.Loc(:, 4:6);
+    HeadPointsCoilsOnly.Label = {'HPI-N', 'HPI-L', 'HPI-R'};
+    HeadPointsCoilsOnly.Type  = {'HPI', 'HPI', 'HPI'};
+    ChannelMatCoilsOnly = process_headpoints_add('AlignMegToScs', ChannelMatNative, HeadPointsCoilsOnly);
+    assert(isequal(ChannelMatCoilsOnly, ChannelMatNative), 'Test 4i: expected the channel file to be unchanged with a single set of markers');
+    % Legacy single set labeled like the anatomical fiducials (assumed head coils): unchanged too
+    HeadPointsLegacy = struct();
+    HeadPointsLegacy.Loc   = HeadPoints.Loc(:, 1:3);
+    HeadPointsLegacy.Label = {'NAS', 'LPA', 'RPA'};
+    HeadPointsLegacy.Type  = {'CARDINAL', 'CARDINAL', 'CARDINAL'};
+    ChannelMatLegacy = process_headpoints_add('AlignMegToScs', ChannelMatNative, HeadPointsLegacy);
+    assert(isequal(ChannelMatLegacy, ChannelMatNative), 'Test 4j: expected the channel file to be unchanged with a legacy single set');
     fprintf('Test 4 (AlignMegToScs): passed\n');
 end
 

@@ -261,12 +261,14 @@ function [strWarn, isOfferAlign] = GetMegAlignWarning(ChannelMat, HeadPoints)
                    'Recommended: re-import the MEG data with a single .pos file that contains both ' 10 ...
                    'the head coils (HPI-N/L/R) and the anatomical fiducials (NAS/LPA/RPA).'];
         isOfferAlign = 1;
-    % MEG in "Native" coordinates, no fiducials available: warn only
+    % MEG in "Native" coordinates, no usable fiducials available: warn only
     elseif ~hasCtfTransf
         strWarn = ['WARNING: The MEG sensors are in "Native" coordinates and do not have the ' 10 ...
-                   '"Native=>Brainstorm/CTF" transformation. The new head points do NOT contain ' 10 ...
-                   'anatomical fiducials (NAS/LPA/RPA), so the MEG coordinate system cannot be ' 10 ...
-                   'aligned based on them.'];
+                   '"Native=>Brainstorm/CTF" transformation. The new head points do NOT provide ' 10 ...
+                   'anatomical fiducials (NAS/LPA/RPA) usable to align the MEG: they are either ' 10 ...
+                   'missing, or the file contains only one set of three markers (assumed to be ' 10 ...
+                   'the MEG head coils, as in older recordings), in which case the head coil ' 10 ...
+                   'positions must also be defined on the MRI.'];
     % MEG already in SCS, fiducials available: warn that the new SCS may differ
     elseif hasFiducials
         strWarn = ['Warning: The new head points contain anatomical fiducials (NAS/LPA/RPA) that ' 10 ...
@@ -282,6 +284,12 @@ end
 function [iNas, iLpa, iRpa] = GetAnatomicalFiducials(HeadPoints)
     % GET_ANATOMICAL_FIDUCIALS: Find the indices of the three anatomical fiducials (NAS/LPA/RPA)
     % in a set of head points. Empty indices are returned for the fiducials that are not present.
+    % Normally the digitization also contains the three MEG head coils (HPI-N/L/R), and both sets
+    % are required to define the coordinate systems. Older datasets contain a single set of three
+    % markers only, labeled either like the anatomical fiducials or like the head coils
+    % (HPI-N/L/R): in that case the markers are assumed to be the head coils (without them,
+    % nothing useful can be done with MEG data), not the anatomical fiducials, so no anatomical
+    % fiducial is returned. See in_channel_pos and in_fopen_ctf for the same convention.
     iNas = [];
     iLpa = [];
     iRpa = [];
@@ -289,6 +297,13 @@ function [iNas, iLpa, iRpa] = GetAnatomicalFiducials(HeadPoints)
         iNas = find(strcmpi(HeadPoints.Label, 'Nasion') | strcmpi(HeadPoints.Label, 'NAS'));
         iLpa = find(strcmpi(HeadPoints.Label, 'Left')   | strcmpi(HeadPoints.Label, 'LPA'));
         iRpa = find(strcmpi(HeadPoints.Label, 'Right')  | strcmpi(HeadPoints.Label, 'RPA'));
+        % Both sets must be present: a single set of markers is treated as head coils only
+        hasCoils = any(strcmpi(HeadPoints.Label, 'HPI-N')) && any(strcmpi(HeadPoints.Label, 'HPI-L')) && any(strcmpi(HeadPoints.Label, 'HPI-R'));
+        if ~(~isempty(iNas) && ~isempty(iLpa) && ~isempty(iRpa) && hasCoils)
+            iNas = [];
+            iLpa = [];
+            iRpa = [];
+        end
     end
 end
 
