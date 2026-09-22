@@ -195,7 +195,7 @@ function [strMsg, strWarn] = AddHeadpoints(ChannelFile, HeadPointsFile, FileForm
     % fiducials (NAS/LPA/RPA), warn the user and offer to update the MEG coordinate system.
     % This only applies when the file was selected manually (interactive session), not when the
     % process is running as part of a pipeline.
-    [strWarn, isOfferAlign] = process_headpoints_add('GetMegAlignWarning', ChannelMat, HeadPoints);
+    [strWarn, isOfferAlign] = GetMegAlignWarning(ChannelMat, HeadPoints);
     strAlignInfo = '';
     if isInteractive && isOfferAlign
         isAlign = java_dialog('confirm', ...
@@ -205,7 +205,7 @@ function [strMsg, strWarn] = AddHeadpoints(ChannelFile, HeadPointsFile, FileForm
              'fiducials (NAS/LPA/RPA) of the new head points?'], ...
             'Align MEG sensors in SCS', []);
         if isAlign
-            ChannelMat = process_headpoints_add('AlignMegToScs', ChannelMat, HeadPoints);
+            ChannelMat = AlignMegToScs(ChannelMat, HeadPoints);
             % The alignment resolved the warning, and is replaced by an informational message
             strAlignInfo = 'The MEG sensors were aligned in SCS coordinates using the digitized anatomical fiducials.';
             strWarn = '';
