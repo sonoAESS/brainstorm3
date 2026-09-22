@@ -151,10 +151,15 @@ else
         posCandidates = {bst_fullfile(dspath, [dsname(1:iUnder-1), '_headshape.pos'])};
     end
     % Attempt #2: Any .pos with a name that starts with the .ds name (excluded "_meg")
+    % Only for BIDS-style "*_meg.ds" folders: otherwise the pattern would be the directory
+    % itself and dir() would return all its contents, not just .pos files.
     if isempty(posCandidates)
-        posDir = dir(strrep(ds_directory, '_meg.ds', '_*.pos'));
-        if ~isempty(posDir)
-            posCandidates = cellfun(@(c)bst_fullfile(dspath, c), {posDir.name}, 'UniformOutput', 0);
+        posPattern = strrep(ds_directory, '_meg.ds', '_*.pos');
+        if ~strcmp(posPattern, ds_directory)
+            posDir = dir(posPattern);
+            if ~isempty(posDir)
+                posCandidates = cellfun(@(c)bst_fullfile(dspath, c), {posDir.name}, 'UniformOutput', 0);
+            end
         end
     end
     % Attempt #3: Any .pos with a name that starts with the subject id
