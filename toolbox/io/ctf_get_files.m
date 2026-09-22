@@ -1,9 +1,12 @@
-function [DataSetName, meg4_files, res4_file, marker_file, pos_file, hc_file, badseg_file] = ctf_get_files( ds_directory, verbose)
+function [DataSetName, meg4_files, res4_file, marker_file, pos_file, hc_file, badseg_file] = ctf_get_files( ds_directory, verbose, isInteractive)
 % CTF_GET_FILES: Get the name and files of a CTF .DS directory.
 %
 % INPUT: 
-%     - ds_directory : Full path to a .ds CTF directory
-%     - verbose      : Whether to display information in the command window (by default)
+%     - ds_directory  : Full path to a .ds CTF directory
+%     - verbose       : Whether to display information in the command window (by default)
+%     - isInteractive : Whether the caller can show interactive dialogs (e.g. when several .pos
+%                       files are found). If not provided, default to the current GUI state
+%                       (Brainstorm GUI running and verbose>=1), for backwards compatibility.
 % OUTPUT:
 %     - DataSetName  : Name of the input CTF dataset
 %     - meg4_files   : Cell array of full paths to the recordings files (.meg4, .1_meg4, .2_meg4, ...)
@@ -36,6 +39,13 @@ function [DataSetName, meg4_files, res4_file, marker_file, pos_file, hc_file, ba
 % Parse arguments
 if nargin < 2
     verbose = 1;
+end
+if (nargin < 3) || isempty(isInteractive)
+    % Backwards compatible default: interactive only if a Brainstorm GUI session is running
+    global GlobalData;
+    isInteractive = (verbose >= 1) && ~isempty(GlobalData) && isstruct(GlobalData) && ...
+                    isfield(GlobalData, 'Program') && isfield(GlobalData.Program, 'GuiLevel') && ...
+                    (GlobalData.Program.GuiLevel >= 0);
 end
 
 % ===== .MEG4 =====
@@ -131,14 +141,9 @@ pos_file = [];
 if (length(posDir) == 1)
     pos_file = bst_fullfile(ds_directory, posDir(1).name);
 elseif (length(posDir) > 1)
-    % Multiple Polhemus files in the same folder: select the one with all the anatomical
-    % fiducials and the most digitized points (see select_pos_file for details).
-    % In an interactive session (Brainstorm GUI running), ask the user to confirm the automatic
+    % Multiple Polhemus files in the same folder: select the best one (see select_pos_file
+    % for details). In an interactive session, ask the user to confirm the automatic
     % selection; in batch/headless mode the selection is automatic and deterministic.
-    global GlobalData;
-    isInteractive = (verbose >= 1) && ~isempty(GlobalData) && isstruct(GlobalData) && ...
-                    isfield(GlobalData, 'Program') && isfield(GlobalData.Program, 'GuiLevel') && ...
-                    (GlobalData.Program.GuiLevel >= 0);
     posFiles = cellfun(@(c)bst_fullfile(ds_directory, c), {posDir.name}, 'UniformOutput', 0);
     pos_file = select_pos_file('SelectPosFile', posFiles, verbose, isInteractive);
 % Check for BIDS version: .pos is in the same folder as the .ds
